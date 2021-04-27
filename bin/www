@@ -1,0 +1,149 @@
+#!/usr/bin/env node
+
+/**
+ * Module dependencies.
+ */
+
+var app = require('../app');
+var debug = require('debug')('server:server');
+var http = require('http');
+var MessageModel = require('../db/db').MessageModel;
+var UserModel = require('../db/db').UserModel;
+/**
+ * Get port from environment and store in Express.
+ */
+
+var port = normalizePort(process.env.PORT || '4000');
+app.set('port', port);
+
+/**
+ * Create HTTP server.
+ */
+
+var server = http.createServer(app);
+var io = require('socket.io')(server);
+/**
+ * Listen on provided port, on all network interfaces.
+ */
+
+server.listen(port);
+server.on('error', onError);
+server.on('listening', onListening);
+const name_id_obj = {};
+io.on('connection', (socket) => {
+  socket.on('username', username => {
+    console.log('connect ' + username + Date.now());
+    name_id_obj[username] = socket.id;
+    MessageModel.find({ "date": { $gt: Date.now() - 1000 * 60 * 60 },$or:[{"to":username},{"to":"public"},{"from":username}] }, (err, data) => {
+      if (data.length == 0) {
+        return;
+      } else {
+        io.to(socket.id).emit('chat', JSON.stringify(data));
+      }
+    })
+    console.log(name_id_obj);
+    io.emit('updateOnlineList',name_id_obj);
+  })
+  socket.on('disconnect', () => {
+    console.log('user disconnected');
+    let id = socket.id;
+    let username = '';
+    for (const key in name_id_obj) {
+      const value = name_id_obj[key];
+      if (value === id) {
+        username = key;
+        break;
+      }
+    }
+    name_id_obj[username] = null;
+    console.log('disconnect',name_id_obj);
+    io.emit('updateOnlineList',name_id_obj);
+  })
+  socket.on('add_concat', (msg) => {
+    let msgObj = JSON.parse(msg);
+    let { from, to } = msgObj;
+    UserModel.findOneAndUpdate({ username: to }, { $push: { friendList: from } }, (err, user) => {
+      console.log(user);
+    })
+    UserModel.findOneAndUpdate({ username: from }, { $push: { friendList: to } }, (err, user) => {
+      console.log(user);
+    })
+    io.to(socket.id).emit('add_concat', to);
+    io.to(name_id_obj[to]).emit('add_concat', from);
+  })
+  socket.on('chat', (message) => {
+    let msg = JSON.parse(message);
+    msg = Object.assign(msg, {
+      date: Date.now()
+    })
+    if (msg.to === 'public') {
+      new MessageModel({ ...msg }).save(function (err, data) {
+        io.emit('chat', JSON.stringify(data));
+      })
+    } else {
+      new MessageModel({ ...msg }).save(function (err, data) {
+        io.to(name_id_obj[msg.to]).emit('chat', JSON.stringify(data));
+        io.to(socket.id).emit('chat', JSON.stringify(data));
+      })
+    }
+  })
+})
+/**
+ * Normalize a port into a number, string, or false.
+ */
+
+function normalizePort(val) {
+  var port = parseInt(val, 10);
+
+  if (isNaN(port)) {
+    // named pipe
+    return val;
+  }
+
+  if (port >= 0) {
+    // port number
+    return port;
+  }
+
+  return false;
+}
+
+/**
+ * Event listener for HTTP server "error" event.
+ */
+
+function onError(error) {
+  if (error.syscall !== 'listen') {
+    throw error;
+  }
+
+  var bind = typeof port === 'string'
+    ? 'Pipe ' + port
+    : 'Port ' + port;
+
+  // handle specific listen errors with friendly messages
+  switch (error.code) {
+    case 'EACCES':
+      console.error(bind + ' requires elevated privileges');
+      process.exit(1);
+      break;
+    case 'EADDRINUSE':
+      console.error(bind + ' is already in use');
+      process.exit(1);
+      break;
+    default:
+      throw error;
+  }
+}
+
+/**
+ * Event listener for HTTP server "listening" event.
+ */
+
+function onListening() {
+  var addr = server.address();
+  var bind = typeof addr === 'string'
+    ? 'pipe ' + addr
+    : 'port ' + addr.port;
+  debug('Listening on ' + bind);
+}
