@@ -3,6 +3,7 @@ var router = express.Router();
 const UserModel = require('../db/db').UserModel;
 const jwt = require('jsonwebtoken');
 const SECRET = 'firstChatAppForLearning';
+const fs = require('fs')
 
 /* GET home page. */
 router.get('/', function (req, res, next) {
@@ -25,7 +26,6 @@ router.get('/', function (req, res, next) {
   }
 });
 
-
 router.post('/register', function (req, res, next) {
   const { username, password } = req.body;
   UserModel.findOne({ username }, (err, user) => {
@@ -37,12 +37,35 @@ router.post('/register', function (req, res, next) {
           {
             expiresIn: 60 * 60 * 24 // 授权时效24小时
           });
-        res.send({ code: 0, data: { id: user._id, username },token });
+        res.send({ code: 0, data: { id: user._id, username }, token });
       });
     } else {
       res.send({ code: 1, msg: "用户已经被注册" });
     }
   })
+})
+
+router.get('/fileImg', function (req, res) {
+  const name = req.query.name;
+  const data = fs.readFileSync('public/images/' + name);
+  res.send(data);
+})
+
+router.get('/bg',function (req,res) {
+  const data = fs.readFileSync('public/bg.jpg');
+  res.send(data);
+})
+
+
+router.get('/file', function (req, res) {
+  const name = req.query.name;
+  console.log(name);
+  const data = fs.readFileSync('public/file/' + name);
+  if (data) {
+    res.send(data);
+  } else {
+    res.send('Something was Wrong');
+  }
 })
 
 router.post('/login', function (req, res, next) {

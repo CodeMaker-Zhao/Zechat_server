@@ -7,8 +7,10 @@
 var app = require('../app');
 var debug = require('debug')('server:server');
 var http = require('http');
+var axios = require('axios')
 var MessageModel = require('../db/db').MessageModel;
 var UserModel = require('../db/db').UserModel;
+var fs = require('fs');
 /**
  * Get port from environment and store in Express.
  */
@@ -34,7 +36,7 @@ io.on('connection', (socket) => {
   socket.on('username', username => {
     console.log('connect ' + username + Date.now());
     name_id_obj[username] = socket.id;
-    MessageModel.find({ "date": { $gt: Date.now() - 1000 * 60 * 60 },$or:[{"to":username},{"to":"public"},{"from":username}] }, (err, data) => {
+    MessageModel.find({ "date": { $gt: Date.now() - 1000 * 60 * 60 }, $or: [{ "to": username }, { "to": "public" }, { "from": username }] }, (err, data) => {
       if (data.length == 0) {
         return;
       } else {
@@ -42,7 +44,41 @@ io.on('connection', (socket) => {
       }
     })
     console.log(name_id_obj);
-    io.emit('updateOnlineList',name_id_obj);
+    io.emit('updateOnlineList', name_id_obj);
+  })
+  socket.on('searchExpression', async keywords => {
+    let res = await axios({
+      method: 'get',
+      url: `https://pic.sogou.com/pics/json.jsp?query=${encodeURIComponent(
+        `${keywords} 表情`,
+      )}&st=5&start=0&xml_len=60&callback=callback&reqFrom=wap_result&`,
+      headers: {
+        accept: '*/*',
+        'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8,zh-TW;q=0.7',
+        'cache-control': 'no-cache',
+        pragma: 'no-cache',
+        'sec-fetch-mode': 'navigate',
+        'sec-fetch-site': 'same-origin',
+        referrer: `https://pic.sogou.com/pic/emo/searchList.jsp?statref=search_form&uID=hTHHybkSPt37C46z&spver=0&rcer=&keyword=${encodeURIComponent(
+          keywords,
+        )}`,
+        referrerPolicy: 'no-referrer-when-downgrade',
+        'user-agent':
+          'Mozilla/5.0 (iPhone; CPU iPhone OS 11_0 like Mac OS X) AppleWebKit/604.1.38 (KHTML, like Gecko) Version/11.0 Mobile/15A372 Safari/604.1',
+      },
+    });
+    try {
+      const parseDataResult = res.data.match(/callback\((.+)\)/);
+      const data = JSON.parse(`${parseDataResult[1]}`);
+      const image = data.items.map(({ locImageLink, width, height }) => ({
+        image: locImageLink,
+        width,
+        height,
+      }));
+      io.to(socket.id).emit('searchExp', image);
+    } catch {
+      io.to(socket.id).emit('searchExp', '发生未知错误');
+    }
   })
   socket.on('disconnect', () => {
     console.log('user disconnected');
@@ -56,8 +92,8 @@ io.on('connection', (socket) => {
       }
     }
     name_id_obj[username] = null;
-    console.log('disconnect',name_id_obj);
-    io.emit('updateOnlineList',name_id_obj);
+    console.log('disconnect', name_id_obj);
+    io.emit('updateOnlineList', name_id_obj);
   })
   socket.on('add_concat', (msg) => {
     let msgObj = JSON.parse(msg);
@@ -86,6 +122,18 @@ io.on('connection', (socket) => {
         io.to(socket.id).emit('chat', JSON.stringify(data));
       })
     }
+  })
+  socket.on('uploadImg', (file) => {
+    const data = file.file;
+    const name = file.name;
+    var imageName = 'public/images/'+name;
+    fs.createWriteStream(imageName).write(data)
+  })
+  socket.on('uploadFile',(file)=>{
+    const data = file.file;
+    const name = file.name;
+    var fileName = 'public/file/'+name;
+    fs.createWriteStream(fileName).write(data);
   })
 })
 /**
